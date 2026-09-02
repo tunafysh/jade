@@ -1,0 +1,19 @@
+[package]
+name = "jade"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+glfw = { version = "0.62", default-features = false, features = [
+    "vulkan",
+    "wayland",
+    "x11",
+    "raw-window-handle-v0-6"
+] }
+ash = "0.38"
+anyhow = "1.0.104"
+tracing = "0.1.44"
+thiserror = "2.0.20"
+glow = "0.18.0"
+glam = "0.33.6"
+shader-slang = "0.1.0"

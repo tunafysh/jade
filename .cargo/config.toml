@@ -1,0 +1,2 @@
+[alias]
+jade-test = "run -p jade-test"
