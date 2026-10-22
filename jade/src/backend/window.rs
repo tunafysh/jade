@@ -5,7 +5,6 @@ pub struct Window {
     width: u32,
     height: u32,
     title: String,
-
     instance: Glfw,
     handle: PWindow,
 }
@@ -27,6 +26,10 @@ impl Window {
             }
 
             BackendType::Vulkan => {
+                glfw.window_hint(WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
+            }
+
+            BackendType::WebGPU => {
                 glfw.window_hint(WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
             }
         }

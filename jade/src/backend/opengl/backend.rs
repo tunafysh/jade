@@ -1,21 +1,23 @@
+use std::{collections::HashMap, sync::Arc};
+
 use anyhow::Result;
 use glfw::Context;
 use glow::{COLOR_BUFFER_BIT, Context as GlowContext, DEPTH_BUFFER_BIT, HasContext};
-use tracing::{info, info_span};
+use tracing::{error, info, info_span};
 
 use crate::backend::{
     backend::Backend,
     draw_command::DrawCommand,
+    opengl::{mesh::OpenGLMesh, shader::OpenGLShader},
     window::Window,
 };
 
 pub struct OpenGLBackend {
     window: Window,
-    gl: GlowContext,
-
+    gl: Arc<GlowContext>,
     // TODO: implement actual resource managers
-    // meshes: HashMap<String, OpenGLMesh>,
-    // shaders: HashMap<String, OpenGLShader>,
+    meshes: HashMap<String, OpenGLMesh>,
+    shaders: HashMap<String, OpenGLShader>,
 }
 
 impl OpenGLBackend {
@@ -25,6 +27,7 @@ impl OpenGLBackend {
         window.handle().make_current();
 
         if !window.handle().is_current() {
+            error!("Failed to make GLFW Context");
             anyhow::bail!("Failed to make GLFW context current");
         }
 
@@ -57,10 +60,7 @@ impl OpenGLBackend {
         );
 
         unsafe {
-            info!(
-                "OpenGL Vendor: {}",
-                gl.get_parameter_string(glow::VENDOR)
-            );
+            info!("OpenGL Vendor: {}", gl.get_parameter_string(glow::VENDOR));
 
             info!(
                 "OpenGL Renderer: {}",
@@ -80,12 +80,7 @@ impl OpenGLBackend {
         unsafe {
             self.gl.enable(glow::DEPTH_TEST);
 
-            self.gl.clear_color(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            );
+            self.gl.clear_color(0.0, 0.0, 0.0, 0.0);
         }
 
         self.update_viewport()?;
@@ -98,12 +93,7 @@ impl OpenGLBackend {
         let height = self.window.height() as i32;
 
         unsafe {
-            self.gl.viewport(
-                0,
-                0,
-                width,
-                height,
-            );
+            self.gl.viewport(0, 0, width, height);
         }
 
         Ok(())
@@ -115,11 +105,13 @@ impl Backend for OpenGLBackend {
         let span = info_span!("OpenGL Initialization");
         let _guard = span.enter();
 
-        let gl = Self::init_context(&mut window)?;
+        let gl = Arc::new(Self::init_context(&mut window)?);
 
         let backend = Self {
             window,
             gl,
+            meshes: HashMap::new(),
+            shaders: HashMap::new(),
         };
 
         backend.init_state()?;
@@ -134,14 +126,17 @@ impl Backend for OpenGLBackend {
     fn begin_frame(&mut self) -> Result<()> {
         self.update_viewport()?;
 
-        unsafe{
+        unsafe {
             self.gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
         }
         Ok(())
     }
 
-    fn draw(&mut self, command: &DrawCommand) {
-        // TODO
+    fn draw(&mut self, command: &DrawCommand) -> Result<()> {
+        let mesh = OpenGLMesh::new(self.gl.clone(), &command.mesh)?;
+        mesh.draw();
+
+        Ok(())
     }
 
     fn end_frame(&mut self) {

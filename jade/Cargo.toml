@@ -4,16 +4,30 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-glfw = { version = "0.62", default-features = false, features = [
-    "vulkan",
-    "wayland",
-    "x11",
-    "raw-window-handle-v0-6"
-] }
-ash = "0.38"
+ash = { version = "0.38", features = ["libloading", "loaded", "std"], default-features = false }
 anyhow = "1.0.104"
 tracing = "0.1.44"
 thiserror = "2.0.20"
 glow = "0.18.0"
 glam = "0.33.6"
-shader-slang = "0.1.0"
+gltf = "1.4.1"
+bytemuck = { version = "1.25.2", features = ["derive"] }
+
+[dependencies.glfw]
+version = "0.62"
+features = [
+    "vulkan",
+    "wayland",
+    "x11",
+    "raw-window-handle-v0-6"
+]
+
+[dependencies.naga]
+version = "30.0.1"
+features = [
+    "wgsl-out",
+    "spv-out",
+    "glsl-out",
+    "wgsl-in",
+    "deserialize"
+]
