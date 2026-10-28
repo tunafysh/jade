@@ -12,15 +12,10 @@ glow = "0.18.0"
 glam = "0.33.6"
 gltf = "1.4.1"
 bytemuck = { version = "1.25.2", features = ["derive"] }
-
-[dependencies.glfw]
-version = "0.62"
-features = [
-    "vulkan",
-    "wayland",
-    "x11",
-    "raw-window-handle-v0-6"
-]
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "webgpu", "gles", "wgsl"] }
+tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread"] }
+winit = "0.30.13"
+ash-window = "0.13.0"
 
 [dependencies.naga]
 version = "30.0.1"

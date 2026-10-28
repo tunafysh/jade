@@ -1,55 +1,50 @@
-use crate::util::types::BackendType;
-use glfw::{Context, Glfw, PWindow, WindowHint, WindowMode};
+use winit::{
+    dpi::PhysicalSize,
+    event_loop::ActiveEventLoop,
+    window::{Fullscreen, Window as WinitWindow, WindowAttributes, WindowId},
+};
+use tracing::info;
 
-pub struct Window {
+#[derive(Debug, Clone, Copy, Default)]
+pub enum WindowMode {
+    #[default]
+    Windowed,
+    BorderlessFullscreen,
+}
+
+#[derive(Debug, Clone)]
+pub struct WindowConfig {
     width: u32,
     height: u32,
     title: String,
-    instance: Glfw,
-    handle: PWindow,
+    mode: WindowMode,
+    resizable: bool,
 }
 
-impl Window {
-    pub fn new(
-        backend_type: BackendType,
-        width: u32,
-        height: u32,
-        title: Option<&str>,
-        mode: Option<WindowMode>,
-    ) -> Result<Self, glfw::InitError> {
-        let mut glfw = glfw::init(glfw::fail_on_errors)?;
-
-        match backend_type {
-            BackendType::OpenGL => {
-                glfw.window_hint(WindowHint::ContextVersion(4, 6));
-                glfw.window_hint(WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
-            }
-
-            BackendType::Vulkan => {
-                glfw.window_hint(WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
-            }
-
-            BackendType::WebGPU => {
-                glfw.window_hint(WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
-            }
-        }
-
-        let (window, _events) = glfw
-            .create_window(
-                width,
-                height,
-                title.unwrap_or("Just Another Damn Engine"),
-                mode.unwrap_or(WindowMode::Windowed),
-            )
-            .ok_or_else(|| glfw::InitError::Internal)?;
-
-        Ok(Self {
+impl WindowConfig {
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
             width,
             height,
-            title: title.unwrap_or("Just Another Damn Engine").to_string(),
-            instance: glfw,
-            handle: window,
-        })
+            title: "Just Another Damn Engine".into(),
+            mode: WindowMode::Windowed,
+            resizable: true,
+        }
+    }
+
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    pub fn mode(mut self, mode: WindowMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn resizable(mut self, resizable: bool) -> Self {
+        self.resizable = resizable;
+        self
     }
 
     pub fn width(&self) -> u32 {
@@ -60,27 +55,96 @@ impl Window {
         self.height
     }
 
+    pub fn title_text(&self) -> &str {
+        &self.title
+    }
+
+    pub fn window_mode(&self) -> WindowMode {
+        self.mode
+    }
+
+    pub(crate) fn attributes(&self) -> WindowAttributes {
+        let attributes = WindowAttributes::default()
+            .with_title(self.title.clone())
+            .with_inner_size(PhysicalSize::new(self.width, self.height))
+            .with_visible(true)
+            .with_resizable(self.resizable);
+
+        match self.mode {
+            WindowMode::Windowed => attributes,
+            WindowMode::BorderlessFullscreen => {
+                attributes.with_fullscreen(Some(Fullscreen::Borderless(None)))
+            }
+        }
+    }
+}
+
+pub struct Window {
+    handle: WinitWindow,
+    title: String,
+}
+
+impl Window {
+    pub(crate) fn from_winit(handle: WinitWindow, title: String) -> Self {
+        Self { handle, title }
+    }
+
+    pub fn create(
+        event_loop: &ActiveEventLoop,
+        config: &WindowConfig,
+    ) -> Result<Self, winit::error::OsError> {
+        let handle = event_loop.create_window(config.attributes())?;
+        handle.set_visible(true);
+        info!(window_id = ?handle.id(), width = handle.inner_size().width, height = handle.inner_size().height, "Native window created and shown");
+        Ok(Self::from_winit(handle, config.title.clone()))
+    }
+
+    pub fn width(&self) -> u32 {
+        self.handle.inner_size().width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.handle.inner_size().height
+    }
+
+    pub fn size(&self) -> PhysicalSize<u32> {
+        self.handle.inner_size()
+    }
+
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    pub fn handle(&mut self) -> &mut PWindow {
-        &mut self.handle
+    pub fn set_title(&mut self, title: impl Into<String>) {
+        let title = title.into();
+
+        self.handle.set_title(&title);
+        self.title = title;
     }
 
-    pub fn instance(&mut self) -> &mut Glfw {
-        &mut self.instance
+    pub fn id(&self) -> WindowId {
+        self.handle.id()
     }
 
-    pub fn should_close(&mut self) -> bool {
-        self.handle.should_close()
+    pub fn request_redraw(&self) {
+        self.handle.request_redraw();
     }
 
-    pub fn poll_events(&mut self) {
-        self.instance.poll_events();
+    pub fn show(&self) {
+        self.handle.set_visible(true);
+        info!(window_id = ?self.handle.id(), "Window shown and focused");
+            info!(window_id = ?self.handle.id(), "Window shown");
     }
 
-    pub fn swap_buffers(&mut self) {
-        self.handle.swap_buffers();
+    pub fn is_focused(&self) -> bool {
+        self.handle.has_focus()
+    }
+
+    pub fn is_minimized(&self) -> Option<bool> {
+        self.handle.is_minimized()
+    }
+
+    pub fn handle(&self) -> &WinitWindow {
+        &self.handle
     }
 }

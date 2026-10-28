@@ -1,149 +1,134 @@
-use std::{collections::HashMap, sync::Arc};
-
+// dont ask i already went through hell by making the vulkan backend...
+use crate::backend::{backend::Backend, window::Window};
 use anyhow::Result;
-use glfw::Context;
-use glow::{COLOR_BUFFER_BIT, Context as GlowContext, DEPTH_BUFFER_BIT, HasContext};
-use tracing::{error, info, info_span};
-
-use crate::backend::{
-    backend::Backend,
-    draw_command::DrawCommand,
-    opengl::{mesh::OpenGLMesh, shader::OpenGLShader},
-    window::Window,
+use tokio::runtime::{Builder, Runtime};
+use wgpu::{
+    Adapter, Backends, Color, CurrentSurfaceTexture, Device, DeviceDescriptor, Instance,
+    InstanceDescriptor, LoadOp, Operations, PresentMode, Queue, RenderPassColorAttachment,
+    RequestAdapterOptions, StoreOp, Surface, SurfaceColorSpace, SurfaceConfiguration,
+    SurfaceTargetUnsafe, SurfaceTexture, TextureUsages,
 };
 
-pub struct OpenGLBackend {
+pub struct OpenGLBackend<'a> {
+    instance: Instance,
+    surface: Surface<'a>,
     window: Window,
-    gl: Arc<GlowContext>,
-    // TODO: implement actual resource managers
-    meshes: HashMap<String, OpenGLMesh>,
-    shaders: HashMap<String, OpenGLShader>,
+    adapter: Adapter,
+    device: Device,
+    queue: Queue,
+    current_frame: Option<SurfaceTexture>,
 }
 
-impl OpenGLBackend {
-    fn init_context(window: &mut Window) -> Result<GlowContext> {
-        info!("Initializing GLFW Context");
+impl<'a> Backend for OpenGLBackend<'a> {
+    fn init(window: Window) -> Result<Self> {
+        let runtime = Builder::new_current_thread().build()?;
+        let mut window = window;
+        let instance = Instance::new(InstanceDescriptor {
+            backends: Backends::GL,
+            ..InstanceDescriptor::new_without_display_handle()
+        });
 
-        window.handle().make_current();
+        let handle = window.handle();
+        let target = unsafe { SurfaceTargetUnsafe::from_display_and_window(handle, handle) }?;
+        let surface = unsafe { instance.create_surface_unsafe(target) }?;
 
-        if !window.handle().is_current() {
-            error!("Failed to make GLFW Context");
-            anyhow::bail!("Failed to make GLFW context current");
-        }
+        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        });
 
-        info!("Initializing OpenGL Context");
+        let adapter = runtime.block_on(adapter)?;
 
-        let gl = unsafe {
-            GlowContext::from_loader_function(|symbol| {
-                window
-                    .handle()
-                    .get_proc_address(symbol)
-                    .map_or(std::ptr::null(), |p| p as *const _)
-            })
+        let device_descriptor = DeviceDescriptor {
+            label: Some("JADE Device"),
+            ..Default::default()
+        };
+        let (device, queue) = runtime.block_on(adapter.request_device(&device_descriptor))?;
+
+        let capabilities = surface.get_capabilities(&adapter);
+
+        let format = capabilities
+            .formats
+            .iter()
+            .copied()
+            .find(|format| format.is_srgb())
+            .unwrap_or(capabilities.formats[0]);
+
+        let configuration = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            format,
+            color_space: SurfaceColorSpace::Srgb,
+            width: window.width(),
+            height: window.height(),
+            present_mode: PresentMode::Fifo,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: capabilities.alpha_modes[0],
+            view_formats: vec![],
         };
 
-        let version = gl.version();
-
-        info!(
-            "OpenGL Version: {}.{}{}{}",
-            version.major,
-            version.minor,
-            version
-                .revision
-                .map(|revision| format!(" Rev: {revision}"))
-                .unwrap_or_default(),
-            if version.is_embedded {
-                " (Embedded)"
-            } else {
-                ""
-            }
-        );
-
-        unsafe {
-            info!("OpenGL Vendor: {}", gl.get_parameter_string(glow::VENDOR));
-
-            info!(
-                "OpenGL Renderer: {}",
-                gl.get_parameter_string(glow::RENDERER)
-            );
-
-            info!(
-                "GLSL Version: {}",
-                gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION)
-            );
-        }
-
-        Ok(gl)
-    }
-
-    fn init_state(&self) -> Result<()> {
-        unsafe {
-            self.gl.enable(glow::DEPTH_TEST);
-
-            self.gl.clear_color(0.0, 0.0, 0.0, 0.0);
-        }
-
-        self.update_viewport()?;
-
-        Ok(())
-    }
-
-    fn update_viewport(&self) -> Result<()> {
-        let width = self.window.width() as i32;
-        let height = self.window.height() as i32;
-
-        unsafe {
-            self.gl.viewport(0, 0, width, height);
-        }
-
-        Ok(())
-    }
-}
-
-impl Backend for OpenGLBackend {
-    fn init(mut window: Window) -> Result<Self> {
-        let span = info_span!("OpenGL Initialization");
-        let _guard = span.enter();
-
-        let gl = Arc::new(Self::init_context(&mut window)?);
-
-        let backend = Self {
+        Ok(Self {
+            current_frame: None,
             window,
-            gl,
-            meshes: HashMap::new(),
-            shaders: HashMap::new(),
-        };
-
-        backend.init_state()?;
-
-        Ok(backend)
+            instance,
+            surface,
+            adapter,
+            device,
+            queue,
+        })
     }
 
-    fn add_shader(&mut self) {
-        // TODO
+    fn add_shader(
+        &mut self,
+        shader: crate::shading::shader::Shader,
+        reflection: crate::shading::reflection::ShaderReflection,
+    ) {
+        todo!()
     }
 
     fn begin_frame(&mut self) -> Result<()> {
-        self.update_viewport()?;
+        let frame = match self.surface.get_current_texture() {
+            CurrentSurfaceTexture::Success(frame) => frame,
+            CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
+                // Reconfigure the surface and retry next frame.
+                return Ok(());
+            }
+            CurrentSurfaceTexture::Timeout => return Ok(()),
+            CurrentSurfaceTexture::Occluded => return Ok(()),
+            _ => return Ok(()),
+        };
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let color_attachment = Some(RenderPassColorAttachment {
+            view: &view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: Operations {
+                load: LoadOp::Clear(Color {
+                    r: 0.1,
+                    g: 0.0,
+                    b: 0.2,
+                    a: 1.0,
+                }),
+                store: StoreOp::Store,
+            },
+        });
 
-        unsafe {
-            self.gl.clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
-        }
         Ok(())
     }
 
-    fn draw(&mut self, command: &DrawCommand) -> Result<()> {
-        let mesh = OpenGLMesh::new(self.gl.clone(), &command.mesh)?;
-        mesh.draw();
-
-        Ok(())
+    fn draw(&mut self) -> Result<()> {
+        todo!()
     }
 
-    fn end_frame(&mut self) {
-        self.window.swap_buffers();
+    fn end_frame(&mut self) -> Result<()> {
+        todo!()
     }
 
-    fn window(&mut self) -> &mut Window {
-        &mut self.window
+    fn window(&mut self) -> &mut crate::backend::window::Window {
+        todo!()
     }
 }
