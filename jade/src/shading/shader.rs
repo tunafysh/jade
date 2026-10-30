@@ -21,18 +21,13 @@ pub enum ShaderStage {
 }
 
 #[derive(Debug, Clone)]
-pub enum ShaderCode {
-    Text(String),
-    Binary(Vec<u8>),
-}
-
-#[derive(Debug, Clone)]
 pub struct ShaderOutput {
-    pub code: HashMap<ShaderStage, ShaderCode>,
+    pub source: String,
     pub entry_points: HashMap<ShaderStage, String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Shader {
+    pub name: String,
     pub output: ShaderOutput,
 }

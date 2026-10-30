@@ -1,56 +1,67 @@
 use std::{collections::HashMap, fs::read_to_string, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use naga::{
-    AddressSpace, Module,
-    back::{glsl, spv, wgsl as back_wgsl},
+    AddressSpace, Module, ShaderStage as NagaShaderStage,
+    back::wgsl as back_wgsl,
     front::wgsl as front_wgsl,
-    proc::BoundsCheckPolicies,
     valid::{Capabilities, ModuleInfo, ValidationFlags, Validator},
 };
 use tracing::{debug, info, info_span};
 
-use crate::{
-    shading::{
-        reflection::{
-            ShaderAddressSpace, ShaderBlock, ShaderReflection, ShaderResource, ShaderResourceKind,
-        },
-        shader::{Shader, ShaderCode, ShaderOutput, ShaderStage},
+use crate::shading::{
+    reflection::{
+        ShaderBlock, ShaderEntryPoint, ShaderField, ShaderReflection, ShaderResource,
+        ShaderResourceKind,
     },
-    util::types::BackendType,
+    shader::{Shader, ShaderOutput, ShaderStage},
 };
 
-#[derive(Clone)]
-pub enum Source {
-    Path(PathBuf),
-    Source(String),
+#[derive(Clone, Debug)]
+pub struct Snippet {
+    pub name: String, //it was necessary dont ask
+    pub source: String,
 }
 
-pub fn compile(source: Source, backend: BackendType) -> Result<(Shader, ShaderReflection)> {
-    let span = info_span!(
-        "Shader Compiler",
-        backend = ?backend,
-    );
+#[derive(Clone)]
+pub enum ShaderSource {
+    Path(PathBuf),
+    Snippet(Snippet),
+}
+
+pub fn compile(source: ShaderSource) -> Result<(Shader, ShaderReflection)> {
+    let span = info_span!("Shader Compiler",);
 
     let _enter = span.enter();
 
     info!("Compiling shader");
 
     // Read source
-    let shader_source = match source {
-        Source::Path(path) => {
+    let (shader_name, shader_source) = match source {
+        ShaderSource::Path(path) => {
             debug!(
                 path = %path.display(),
                 "Reading shader source"
             );
 
-            read_to_string(path)?
+            let name: String = path
+                .file_name()
+                .ok_or(anyhow!("How the hell did you even do this?!"))?
+                .to_str()
+                .ok_or(anyhow!("Please name the file better :/"))?
+                .to_string();
+
+            (name, read_to_string(path)?)
         }
 
-        Source::Source(source) => {
-            debug!(bytes = source.len(), "Using in-memory shader source");
+        ShaderSource::Snippet(snippet) => {
+            debug!(
+                name = snippet.name,
+                bytes = snippet.source.len(),
+                "Using in-memory shader source"
+            );
 
-            source
+            (snippet.name, snippet.source)
         }
     };
 
@@ -73,7 +84,7 @@ pub fn compile(source: Source, backend: BackendType) -> Result<(Shader, ShaderRe
     );
 
     // Reflection
-    let reflection = reflect(&module);
+    let reflection = reflect(&module)?;
 
     info!(
         resources = reflection.resources.len(),
@@ -103,21 +114,18 @@ pub fn compile(source: Source, backend: BackendType) -> Result<(Shader, ShaderRe
         entry_points.insert(stage, entry_point.name.clone());
     }
 
-    // Compile
-    let code = match backend {
-        BackendType::OpenGL => compile_glsl(&module, &info)?,
-
-        BackendType::Vulkan => compile_spirv(&module, &info)?,
-
-        BackendType::WebGPU => compile_wgsl(&module, &info)?,
-    };
+    let emitted_shader = emit_wgsl(&module, &info)?;
 
     let shader = Shader {
-        output: ShaderOutput { code, entry_points },
+        name: shader_name,
+        output: ShaderOutput {
+            source: emitted_shader,
+            entry_points,
+        },
     };
 
     info!(
-        stages = shader.output.code.len(),
+        stages = shader.output.source.len(),
         entry_points = shader.output.entry_points.len(),
         "Shader compilation complete"
     );
@@ -125,9 +133,10 @@ pub fn compile(source: Source, backend: BackendType) -> Result<(Shader, ShaderRe
     Ok((shader, reflection))
 }
 
-fn reflect(module: &Module) -> ShaderReflection {
+fn reflect(module: &Module) -> Result<ShaderReflection> {
     let mut resources = HashMap::new();
     let mut blocks = HashMap::new();
+    let mut entrypoints = Vec::new();
 
     for (_, global) in module.global_variables.iter() {
         let Some(binding) = global.binding else {
@@ -135,14 +144,8 @@ fn reflect(module: &Module) -> ShaderReflection {
         };
 
         let (kind, address_space) = match global.space {
-            AddressSpace::Uniform => (
-                ShaderResourceKind::UniformBuffer,
-                ShaderAddressSpace::Uniform,
-            ),
-            AddressSpace::Storage { .. } => (
-                ShaderResourceKind::StorageBuffer,
-                ShaderAddressSpace::Storage,
-            ),
+            AddressSpace::Uniform => (ShaderResourceKind::UniformBuffer, AddressSpace::Uniform),
+            AddressSpace::Storage { .. } => (ShaderResourceKind::StorageBuffer, global.space),
 
             _ => continue,
         };
@@ -178,125 +181,59 @@ fn reflect(module: &Module) -> ShaderReflection {
         );
     }
 
-    ShaderReflection { resources, blocks }
-}
+    for entry in &module.entry_points {
+        let mut inputs = Vec::new();
 
-fn compile_glsl(module: &Module, info: &ModuleInfo) -> Result<HashMap<ShaderStage, ShaderCode>> {
-    let mut stages = HashMap::new();
+        for input in &entry.function.arguments {
+            let ty = &module.types[input.ty];
+            let field = ShaderField {
+                name: input.name.clone(),
+                ty: ty.inner.clone(),
+                binding: input.binding.clone(),
+            };
 
-    for entry_point in &module.entry_points {
-        let Some(stage) = ShaderStage::try_from(entry_point.stage).ok() else {
-            continue;
+            inputs.push(field);
+        }
+        let parsed = ShaderEntryPoint {
+            stage: ShaderStage::try_from(entry.stage)?,
+            inputs,
+            name: entry.name.clone(),
         };
-
-        let span = info_span!(
-            "compile_stage",
-            stage = ?stage,
-            entry_point = %entry_point.name,
-            backend = "OpenGL",
-        );
-
-        let _enter = span.enter();
-
-        info!("Compiling shader stage");
-
-        let options = glsl::Options::default();
-
-        let pipeline_options = glsl::PipelineOptions {
-            shader_stage: entry_point.stage,
-            entry_point: entry_point.name.clone(),
-            multiview: None,
-        };
-
-        let mut output = String::new();
-
-        let mut writer = glsl::Writer::new(
-            &mut output,
-            module,
-            info,
-            &options,
-            &pipeline_options,
-            BoundsCheckPolicies::default(),
-        )?;
-
-        writer.write()?;
-
-        debug!(bytes = output.len(), "Generated GLSL");
-
-        stages.insert(stage, ShaderCode::Text(output));
-
-        info!("Shader stage compiled");
+        entrypoints.push(parsed);
     }
 
-    Ok(stages)
+    Ok(ShaderReflection {
+        resources,
+        blocks,
+        entry_points: entrypoints,
+    })
 }
 
-fn compile_spirv(module: &Module, info: &ModuleInfo) -> Result<HashMap<ShaderStage, ShaderCode>> {
-    let mut stages = HashMap::new();
-
-    let options = spv::Options::default();
-
-    let mut words = Vec::<u32>::new();
-
-    let mut writer = spv::Writer::new(&options)?;
-
-    writer.write(module, info, None, &None, &mut words)?;
-
-    let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_le_bytes()).collect();
-
-    debug!(words = words.len(), bytes = bytes.len(), "Generated SPIR-V");
-
-    // The SPIR-V module contains all entry points.
-    // Each supported stage references the same binary.
-    for entry_point in &module.entry_points {
-        let Some(stage) = ShaderStage::try_from(entry_point.stage).ok() else {
-            continue;
-        };
-
-        stages.insert(stage, ShaderCode::Binary(bytes.clone()));
-    }
-
-    Ok(stages)
-}
-
-fn compile_wgsl(module: &Module, info: &ModuleInfo) -> Result<HashMap<ShaderStage, ShaderCode>> {
+fn emit_wgsl(module: &Module, info: &ModuleInfo) -> Result<String> {
     let mut output = String::new();
 
     let flags = back_wgsl::WriterFlags::all();
-
     let mut writer = back_wgsl::Writer::new(&mut output, flags);
 
     writer.write(module, info)?;
 
-    debug!(bytes = output.len(), "Generated WGSL");
+    debug!(bytes = output.len(), "Emitted WGSL");
 
-    // WGSL is a module containing all entry points.
-    // Each supported stage references the same source.
-    let mut stages = HashMap::new();
-
-    for entry_point in &module.entry_points {
-        let Some(stage) = ShaderStage::try_from(entry_point.stage).ok() else {
-            continue;
-        };
-
-        stages.insert(stage, ShaderCode::Text(output.clone()));
-    }
-
-    Ok(stages)
+    Ok(output)
 }
 
-impl TryFrom<naga::ShaderStage> for ShaderStage {
-    type Error = ();
+impl TryFrom<NagaShaderStage> for ShaderStage {
+    type Error = anyhow::Error;
 
-    fn try_from(stage: naga::ShaderStage) -> Result<Self, Self::Error> {
+    fn try_from(stage: NagaShaderStage) -> Result<Self, Self::Error> {
         match stage {
-            naga::ShaderStage::Vertex => Ok(Self::Vertex),
+            NagaShaderStage::Vertex => Ok(Self::Vertex),
 
-            naga::ShaderStage::Fragment => Ok(Self::Fragment),
+            NagaShaderStage::Fragment => Ok(Self::Fragment),
 
-            naga::ShaderStage::Compute => Ok(Self::Compute),
+            NagaShaderStage::Compute => Ok(Self::Compute),
 
-            _ => Err(()),
+            _ => Err(anyhow!("This stage is not supported yet probs")),
         }
     }
 }

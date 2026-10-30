@@ -1,15 +1,20 @@
-@vertex
-fn vertex(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
-    var positions = array<vec2<f32>, 3>(
-        vec2<f32>( 0.0, -0.5),
-        vec2<f32>( 0.5,  0.5),
-        vec2<f32>(-0.5,  0.5),
-    );
+struct Vertex {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+}
 
-    return vec4<f32>(positions[vertex_index], 0.0, 1.0);
+@vertex
+fn vertex(
+    @location(0) position: vec2<f32>,
+    @location(1) color: vec4<f32>
+) -> Vertex {
+    return Vertex(
+        vec4<f32>(position, 0.0, 1.0),
+        color
+    );
 }
 
 @fragment
-fn fragment() -> @location(0) vec4<f32> {
-    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+fn fragment(input: Vertex) -> @location(0) vec4<f32> {
+    return input.color;
 }

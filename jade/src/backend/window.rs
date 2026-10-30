@@ -1,9 +1,9 @@
+use tracing::info;
 use winit::{
     dpi::PhysicalSize,
     event_loop::ActiveEventLoop,
     window::{Fullscreen, Window as WinitWindow, WindowAttributes, WindowId},
 };
-use tracing::info;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum WindowMode {
@@ -132,8 +132,7 @@ impl Window {
 
     pub fn show(&self) {
         self.handle.set_visible(true);
-        info!(window_id = ?self.handle.id(), "Window shown and focused");
-            info!(window_id = ?self.handle.id(), "Window shown");
+        info!(window_id = ?self.handle.id(), "Requested to show window.");
     }
 
     pub fn is_focused(&self) -> bool {

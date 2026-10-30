@@ -1,6 +1,7 @@
 pub mod backend;
 pub mod graphics;
 pub mod importers;
+pub mod input;
 pub mod node;
 pub mod renderer;
 pub mod shading;

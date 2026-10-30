@@ -1,13 +1,8 @@
 use anyhow::Result;
 use jade::{
     backend::{
-        backend::Backend,
-        vulkan::backend::VulkanBackend,
-        window::{Window, WindowConfig},
-    },
-    shading::compiler::{Source, compile},
-    util::types::BackendType,
-    winit::{
+        backend::Backend, draw_command::DrawCommand, window::{Window, WindowConfig},
+    }, graphics::mesh::Mesh, shading::compiler::{ShaderSource, Snippet, compile}, winit::{
         application::ApplicationHandler,
         event::WindowEvent,
         event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
@@ -17,14 +12,18 @@ use jade::{
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-struct JadeTestApp {
-    backend: Option<VulkanBackend>,
+const TRIANGLE_SHADER: &str = include_str!("../../assets/triangle.wgsl");
+
+struct JadeTestApp<'a> {
+    window: Option<Window>,
+    backend: Option<Backend<'a>>,
     failure: Option<anyhow::Error>,
 }
 
-impl JadeTestApp {
+impl<'a> JadeTestApp<'a> {
     fn new() -> Self {
         Self {
+            window: None,
             backend: None,
             failure: None,
         }
@@ -35,34 +34,91 @@ impl JadeTestApp {
         self.failure = Some(err);
         event_loop.exit();
     }
+
+    fn initialize_backend(&mut self, _event_loop: &ActiveEventLoop) -> Result<()> {
+        let window = self
+            .window
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("No window available"))?;
+
+        info!("Initializing WGPU backend");
+
+        let mut backend = Backend::init(window)?;
+
+        let (shader, reflection) = compile(ShaderSource::Snippet(Snippet {
+            name: "triangle".to_string(),
+            source: TRIANGLE_SHADER.to_string(),
+        }))?;
+
+        backend.add_shader(shader, reflection);
+        backend.add_graphics_pipeline("triangle".to_string())?;
+
+        info!("WGPU backend initialized");
+
+        backend.window().request_redraw();
+        self.backend = Some(backend);
+
+        Ok(())
+    }
+
+    fn render(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(backend) = self.backend.as_mut() else {
+            return;
+        };
+
+        let result = (|| -> Result<()> {
+            if !backend.begin_frame()? {
+                backend.window().request_redraw();
+                return Ok(());
+            }
+
+            
+
+            let command = DrawCommand {
+                shader: "triangle".to_string(),
+                ..Default::default()
+            };
+
+            backend.draw(command)?;
+            backend.end_frame()?;
+
+            backend.window().request_redraw();
+
+            Ok(())
+        })();
+
+        if let Err(err) = result {
+            self.fail(event_loop, err);
+        }
+    }
 }
 
-impl ApplicationHandler for JadeTestApp {
+impl<'a> ApplicationHandler for JadeTestApp<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.backend.is_some() || self.failure.is_some() {
+        if self.window.is_some() || self.backend.is_some() || self.failure.is_some() {
             return;
         }
 
-        let result = (|| -> Result<VulkanBackend> {
-            let config = WindowConfig::new(1280, 720).title("JADE Vulkan Test");
+        let result = (|| -> Result<()> {
+            let config = WindowConfig::new(1280, 720).title("JADE WGPU Test");
 
             let window = Window::create(event_loop, &config)?;
-            let backend = VulkanBackend::init(window)?;
+            window.show();
 
-            info!("Vulkan backend initialized");
-            Ok(backend)
+            info!(window_id = ?window.id(), "Window created");
+
+            self.window = Some(window);
+
+            self.window
+                .as_ref()
+                .expect("window was just stored")
+                .request_redraw();
+
+            Ok(())
         })();
 
-        match result {
-            Ok(mut backend) => {
-                backend.window().show();
-                backend.window().request_redraw();
-                info!(window_id = ?backend.window().id(), "Vulkan test window ready");
-                self.backend = Some(backend);
-            }
-            Err(err) => {
-                self.fail(event_loop, err);
-            }
+        if let Err(err) = result {
+            self.fail(event_loop, err);
         }
     }
 
@@ -72,11 +128,14 @@ impl ApplicationHandler for JadeTestApp {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        let Some(backend) = self.backend.as_mut() else {
-            return;
-        };
+        let matches_window = self
+            .backend
+            .as_mut()
+            .map(|backend| backend.window().id() == window_id)
+            .or_else(|| self.window.as_ref().map(|window| window.id() == window_id))
+            .unwrap_or(false);
 
-        if backend.window().id() != window_id {
+        if !matches_window {
             return;
         }
 
@@ -86,27 +145,25 @@ impl ApplicationHandler for JadeTestApp {
             }
 
             WindowEvent::RedrawRequested => {
-                info!(window_id = ?window_id, "Window redraw requested");
-                    let result = backend
-                        .begin_frame()
-                        .and_then(|()| backend.draw())
-                        .and_then(|()| backend.end_frame());
-
-                    if let Err(err) = result {
+                if self.backend.is_none() {
+                    if let Err(err) = self.initialize_backend(event_loop) {
                         self.fail(event_loop, err);
                     }
+                } else {
+                    self.render(event_loop);
+                }
             }
 
-            WindowEvent::Resized(_) => {}
+            WindowEvent::Resized(_) => {
+                // Handle surface reconfiguration here if required.
+            }
 
             _ => {}
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.backend.is_none() && self.failure.is_some() {
-            event_loop.exit();
-        }
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        // ControlFlow::Wait lets the event loop sleep until an event arrives.
     }
 }
 
@@ -115,24 +172,6 @@ fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .with_level(true)
         .init();
-
-    let shader = include_str!("../../assets/default.wgsl");
-    let source = Source::Source(shader.to_string());
-
-    for backend_type in [
-        BackendType::OpenGL,
-        BackendType::Vulkan,
-        BackendType::WebGPU,
-    ] {
-        info!("Compiling sample shader for {backend_type:?}");
-
-        let (compiled_shader, reflection) = compile(source.clone(), backend_type)?;
-
-        info!(
-            "{backend_type:?} shader: {compiled_shader:#?}\n\
-             Reflection: {reflection:#?}"
-        );
-    }
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
@@ -144,6 +183,7 @@ fn main() -> Result<()> {
         return Err(err);
     }
 
-    info!("JADE Vulkan test harness exiting");
+    info!("JADE test harness exiting");
+
     Ok(())
 }

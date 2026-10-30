@@ -1,9 +1,21 @@
 use std::collections::HashMap;
 
+use naga::{AddressSpace, Binding, TypeInner};
+
+use crate::shading::shader::ShaderStage;
+
+#[derive(Debug)]
+pub struct ShaderEntryPoint {
+    pub name: String,
+    pub inputs: Vec<ShaderField>,
+    pub stage: ShaderStage,
+}
+
 #[derive(Debug)]
 pub struct ShaderReflection {
     pub resources: HashMap<String, ShaderResource>,
     pub blocks: HashMap<String, ShaderBlock>,
+    pub entry_points: Vec<ShaderEntryPoint>,
 }
 
 #[derive(Debug)]
@@ -23,34 +35,14 @@ pub enum ShaderResourceKind {
 
 #[derive(Debug)]
 pub struct ShaderBlock {
-    pub address_space: ShaderAddressSpace,
+    pub address_space: AddressSpace,
     pub size: u32,
     pub fields: Vec<ShaderField>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShaderAddressSpace {
-    Uniform,
-    Storage,
-}
-
 #[derive(Debug)]
 pub struct ShaderField {
-    pub name: String,
-    pub offset: u32,
-    pub size: u32,
-    pub ty: ShaderFieldType,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShaderFieldType {
-    Float,
-    Int,
-    Uint,
-    Bool,
-    Vec2,
-    Vec3,
-    Vec4,
-    Mat3,
-    Mat4,
+    pub name: Option<String>,
+    pub ty: TypeInner,
+    pub binding: Option<Binding>,
 }

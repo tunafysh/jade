@@ -4,18 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ash = { version = "0.38", features = ["libloading", "loaded", "std"], default-features = false }
 anyhow = "1.0.104"
 tracing = "0.1.44"
 thiserror = "2.0.20"
-glow = "0.18.0"
-glam = "0.33.6"
-gltf = "1.4.1"
+glam = "0.34.1"
 bytemuck = { version = "1.25.2", features = ["derive"] }
-wgpu = { version = "30.0.1", default-features = false, features = ["std", "webgpu", "gles", "wgsl"] }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread"] }
 winit = "0.30.13"
-ash-window = "0.13.0"
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "wgsl", "vulkan", "gles", "metal"] }
+gltf = "1.4.1"
+tobj = "4.0.3"
 
 [dependencies.naga]
 version = "30.0.1"

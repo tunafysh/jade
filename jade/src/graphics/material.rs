@@ -1,6 +1,6 @@
 use glam::Vec4;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct Material {
     pub color: Vec4,
     pub roughness: f32,

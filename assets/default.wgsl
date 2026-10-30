@@ -35,7 +35,6 @@ fn vertex(input: VertexInput) -> VertexOutput {
     return output;
 }
 
-
 @fragment
 fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
     return globals.color;
