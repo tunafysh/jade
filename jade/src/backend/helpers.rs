@@ -53,29 +53,29 @@ pub fn create_vertex_buffer_layout<'a>() -> VertexBufferLayout<'a> {
         array_stride: size_of::<CVertex>() as BufferAddress,
         step_mode: VertexStepMode::Vertex,
         attributes: &[
-            // Position
+            // Position (12 byte)
             VertexAttribute {
                 offset: 0,
                 shader_location: 0,
                 format: VertexFormat::Float32x3,
             },
-            // Normal
+            // Normal (12 byte)
             VertexAttribute {
                 offset: 12,
                 shader_location: 1,
                 format: VertexFormat::Float32x3,
             },
-            // UV
+            // UV (8 byte)
             VertexAttribute {
                 offset: 24,
                 shader_location: 2,
                 format: VertexFormat::Float32x2,
             },
-            // Color
+            // Color (16 byte)
             VertexAttribute {
                 offset: 32,
                 shader_location: 3,
-                format: VertexFormat::Float32x3,
+                format: VertexFormat::Float32x4,
             },
         ],
     }

@@ -1,8 +1,14 @@
 use anyhow::Result;
 use jade::{
     backend::{
-        backend::Backend, draw_command::DrawCommand, window::{Window, WindowConfig},
-    }, graphics::mesh::Mesh, shading::compiler::{ShaderSource, Snippet, compile}, winit::{
+        backend::Backend,
+        draw_command::DrawCommand,
+        window::{Window, WindowConfig},
+    },
+    graphics::mesh::Mesh,
+    shading::compiler::{ShaderSource, Snippet, compile},
+    vertex,
+    winit::{
         application::ApplicationHandler,
         event::WindowEvent,
         event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
@@ -72,10 +78,21 @@ impl<'a> JadeTestApp<'a> {
                 return Ok(());
             }
 
-            
+            let vertices = vec![
+                vertex!(-0.5, -0.5, -0.2),
+                vertex!(0.5, -0.5, 0.2),
+                vertex!(-0.5, 0.5, 0.0),
+            ];
+
+            let mesh = Mesh {
+                vertices,
+                indices: vec![0, 1, 2],
+                primitive: jade::graphics::mesh::Primitive::Triangles,
+            };
 
             let command = DrawCommand {
                 shader: "triangle".to_string(),
+                mesh,
                 ..Default::default()
             };
 

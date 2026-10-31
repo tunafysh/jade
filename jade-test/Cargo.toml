@@ -6,5 +6,6 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.104"
 jade = { path = "../jade" }
+rand = "0.10.3"
 tracing = "0.1.44"
 tracing-subscriber = {version = "0.3.23", features = ["env-filter"]}

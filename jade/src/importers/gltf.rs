@@ -35,7 +35,7 @@ impl GltfImporter {
                 let colors = reader
                     .read_colors(0)
                     .ok_or(anyhow!("Primitive has no vertex colors."))?
-                    .into_rgb_f32();
+                    .into_rgba_f32();
 
                 let indices = reader
                     .read_indices()

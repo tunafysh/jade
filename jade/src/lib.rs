@@ -1,4 +1,5 @@
 pub mod backend;
+pub use glam;
 pub mod graphics;
 pub mod importers;
 pub mod input;

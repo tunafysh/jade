@@ -3,18 +3,21 @@ use std::collections::HashMap;
 // dont ask i already went through hell by making the vulkan backend...
 use crate::{
     backend::{
-        draw_command::DrawCommand, helpers::{
-            create_compute_pipeline_descriptor, create_primitive_state, create_render_pipeline_descriptor, create_vertex_buffer_layout,
-        }, types::ShaderResource, window::Window,
-    }, graphics::vertex::CVertex, shading::shader::ShaderStage,
+        draw_command::DrawCommand,
+        helpers::{
+            create_compute_pipeline_descriptor, create_primitive_state,
+            create_render_pipeline_descriptor, create_vertex_buffer_layout,
+        },
+        types::ShaderResource,
+        window::Window,
+    },
+    graphics::vertex::CVertex,
+    shading::shader::ShaderStage,
 };
 use anyhow::{Result, anyhow};
 use bytemuck::cast_slice;
 use tokio::runtime::Builder;
-use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt},
-    *,
-};
+use wgpu::*;
 
 struct Frame {
     texture: SurfaceTexture,
@@ -22,6 +25,7 @@ struct Frame {
     encoder: CommandEncoder,
 }
 
+#[allow(dead_code)] // will need the instance and adapter later maybe
 pub struct Backend<'a> {
     instance: Instance,
     surface: Surface<'a>,
@@ -35,6 +39,7 @@ pub struct Backend<'a> {
     render_pipelines: HashMap<String, wgpu::RenderPipeline>,
     compute_pipelines: HashMap<String, wgpu::ComputePipeline>,
     vertex_buffer: Buffer,
+    index_buffer: Buffer,
 }
 
 impl<'a> Backend<'a> {
@@ -58,6 +63,17 @@ impl<'a> Backend<'a> {
         });
 
         let adapter = runtime.block_on(adapter)?;
+
+        let info = adapter.get_info();
+
+        tracing::info!(
+            name = %info.name,
+            vendor = info.vendor,
+            device = info.device,
+            backend = ?info.backend,
+            device_type = ?info.device_type,
+            "Selected GPU adapter"
+        );
 
         let device_descriptor = DeviceDescriptor {
             label: Some("JADE Device"),
@@ -95,6 +111,15 @@ impl<'a> Backend<'a> {
             mapped_at_creation: false,
         });
 
+        let index_buffer = device.create_buffer(
+            &BufferDescriptor {
+                label: Some("JADE Index Buffer"),
+                size: 1024 * 1024, // same as 8 lines before
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false
+            }
+        );
+
         Ok(Self {
             current_frame: None,
             window,
@@ -108,6 +133,7 @@ impl<'a> Backend<'a> {
             render_pipelines: HashMap::new(),
             compute_pipelines: HashMap::new(),
             vertex_buffer,
+            index_buffer
         })
     }
 
@@ -152,9 +178,7 @@ impl<'a> Backend<'a> {
             module: &shader.module,
             entry_point: Some(&vertex_name),
             compilation_options: Default::default(),
-            buffers: &[
-                Some(create_vertex_buffer_layout())
-            ],
+            buffers: &[Some(create_vertex_buffer_layout())],
         };
 
         let fragment_state = FragmentState {
@@ -283,11 +307,15 @@ impl<'a> Backend<'a> {
             multiview_mask: None,
         });
 
-        self.queue.write_buffer(&self.vertex_buffer, 0, cast_slice(&vertices));
+        self.queue
+            .write_buffer(&self.vertex_buffer, 0, cast_slice(&vertices));
+
+        self.queue.write_buffer(&self.index_buffer, 0, cast_slice(&command.mesh.indices));
 
         render_pass.set_pipeline(pipeline);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.draw(0..vertices.len() as u32, 0..1);
+        render_pass.set_index_buffer(self.index_buffer.slice(..), IndexFormat::Uint32);
+        render_pass.draw_indexed(0..command.mesh.indices.len() as u32, 0 ,0..1);
 
         drop(render_pass);
         Ok(())

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use glam::{Vec2, Vec3};
+use glam::{Vec2, Vec3, Vec4};
 use std::path::Path;
 
 use crate::graphics::{
@@ -35,7 +35,7 @@ impl ObjImporter {
                 position: Vec3::from_array([position[0], position[1], position[2]]),
                 normal: Self::vec3_at(&mesh.normals, index),
                 uv: Self::vec2_at(&mesh.texcoords, index),
-                color: Self::vec3_at(&mesh.vertex_color, index),
+                color: Self::vec4_at(&mesh.vertex_color, index),
             })
             .collect();
 
@@ -58,5 +58,12 @@ impl ObjImporter {
             .get(index * 3..index * 3 + 3)
             .map(|values| Vec3::from_array([values[0], values[1], values[2]]))
             .unwrap_or(Vec3::ZERO)
+    }
+
+    fn vec4_at(values: &[f32], index: usize) -> Vec4 {
+        values
+            .get(index * 4..index * 4 + 4)
+            .map(|values| Vec4::from_array([values[0], values[1], values[2], values[3]]))
+            .unwrap_or(Vec4::ZERO)
     }
 }
